@@ -15,7 +15,7 @@ general:
   benchmark_csv_path: benchmark_llama.csv
   consumed_train_samples: null
   ignore_sanity_checks: true
-  project: debug
+  project: nyu-bdml-2-nanotron
   run: tiny_llama_%date_%jobid
   seed: 42
   step: null
@@ -41,7 +41,7 @@ model:
     max_position_embeddings: 128256
     num_attention_heads: 16
     num_hidden_layers: 28
-    num_key_value_heads: 2
+    num_key_value_heads: 4 # should be bigger than tp
     pad_token_id: null
     pretraining_tp: 1
     rms_norm_eps: 1.0e-05
@@ -69,7 +69,7 @@ optimizer:
   weight_decay: 0.01
   zero_stage: 0
 parallelism:
-  dp: 4
+  dp: 2
   expert_parallel_size: 1
   pp: 1
   pp_engine: 1f1b
@@ -83,10 +83,10 @@ tokenizer:
   tokenizer_name_or_path: robot-test/dummy-tokenizer-wordlevel
   tokenizer_revision: null
 tokens:
-  batch_accumulation_per_replica: 1
+  batch_accumulation_per_replica: 8 # nb_micro_batch_size
   limit_test_batches: 0
   limit_val_batches: 0
-  micro_batch_size: 3
+  micro_batch_size: 8
   sequence_length: 4096
   train_steps: 2000
   val_check_interval: -1

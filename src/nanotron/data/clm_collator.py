@@ -3,10 +3,10 @@ from typing import Dict, List, Union
 
 import numpy as np
 import torch
-
-from nanotron import distributed as dist
 from nanotron.parallel.context import ParallelContext
 from nanotron.parallel.pipeline_parallel.tensor_pointer import TensorPointer
+
+from nanotron import distributed as dist
 
 
 @dataclasses.dataclass
@@ -27,7 +27,9 @@ class DataCollatorForCLM:
     use_numpy: bool = True
 
     @torch.profiler.record_function("DataCollatorForCLM.__call__")
-    def __call__(self, examples: List[Dict[str, List[np.ndarray]]]) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
+    def __call__(
+        self, examples: List[Dict[str, List[np.ndarray]]]
+    ) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
 
         vstack = np.vstack if self.use_numpy else torch.vstack
         ones = np.ones if self.use_numpy else torch.ones
@@ -48,7 +50,9 @@ class DataCollatorForCLM:
             }
 
         # TODO @nouamanetazi: Is it better to have examples as np.array or torch.Tensor?
-        input_ids = vstack([examples[i]["input_ids"] for i in range(len(examples))])  # (b, s)
+        input_ids = vstack(
+            [examples[i]["input_ids"] for i in range(len(examples))]
+        )  # (b, s)
         batch_size, expanded_input_length = input_ids.shape
 
         result: Dict[str, Union[np.ndarray, torch.LongTensor, TensorPointer]] = {}
@@ -63,17 +67,26 @@ class DataCollatorForCLM:
         ), f"Samples should be of length {self.sequence_length + 1} (seq_len+1), but got {expanded_input_length}"
 
         # Process inputs: last token is the label
+        cp_rank, cp_size = (
+            dist.get_rank(self.parallel_context.cp_pg),
+            self.parallel_context.context_parallel_size,
+        )
         if current_pp_rank == self.input_pp_rank:
             result["input_ids"] = input_ids[:, :-1]
-            result["input_mask"] = ones((batch_size, self.sequence_length), dtype=bool_dtype)
+            result["input_mask"] = ones(
+                (batch_size, self.sequence_length), dtype=bool_dtype
+            )
 
             # Context Parallelism: Each CP rank gets a slice of the input_ids and input_mask
-            cp_rank, cp_size = dist.get_rank(self.parallel_context.cp_pg), self.parallel_context.context_parallel_size
+
             local_slice = slice(
-                cp_rank * self.sequence_length // cp_size, (cp_rank + 1) * self.sequence_length // cp_size
+                cp_rank * self.sequence_length // cp_size,
+                (cp_rank + 1) * self.sequence_length // cp_size,
             )
             result["input_ids"] = result["input_ids"][:, local_slice]  # (b, s/cp_size)
-            result["input_mask"] = result["input_mask"][:, local_slice]  # (b, s/cp_size)
+            result["input_mask"] = result["input_mask"][
+                :, local_slice
+            ]  # (b, s/cp_size)
 
         # Process labels: shift them to the left
         if current_pp_rank == self.output_pp_rank:
@@ -82,11 +95,15 @@ class DataCollatorForCLM:
             # Create label mask based on position_ids
             if "positions" in examples[0]:
                 # Get position_ids for the labels (shifted right by 1 to align with label_ids)
-                position_ids = np.vstack([examples[i]["positions"] for i in range(len(examples))])
+                position_ids = np.vstack(
+                    [examples[i]["positions"] for i in range(len(examples))]
+                )
                 position_ids = position_ids[:, 1:]  # Shift right to align with labels
 
                 # Create mask: True for all tokens except the one before position_id == 0
-                result["label_mask"] = np.ones((batch_size, self.sequence_length), dtype=np.bool_)
+                result["label_mask"] = np.ones(
+                    (batch_size, self.sequence_length), dtype=np.bool_
+                )
 
                 # Find where position_ids is 0
                 zeros = position_ids == 0
@@ -94,14 +111,19 @@ class DataCollatorForCLM:
                 result["label_mask"] &= ~zeros
             else:
                 # Default: all tokens are used for loss
-                result["label_mask"] = np.ones((batch_size, self.sequence_length), dtype=np.bool_)
+                result["label_mask"] = np.ones(
+                    (batch_size, self.sequence_length), dtype=np.bool_
+                )
 
             # Context Parallelism: Each CP rank gets a slice of the label_ids and label_mask
             local_slice = slice(
-                cp_rank * self.sequence_length // cp_size, (cp_rank + 1) * self.sequence_length // cp_size
+                cp_rank * self.sequence_length // cp_size,
+                (cp_rank + 1) * self.sequence_length // cp_size,
             )
             result["label_ids"] = result["label_ids"][:, local_slice]  # (b, s/cp_size)
-            result["label_mask"] = result["label_mask"][:, local_slice]  # (b, s/cp_size)
+            result["label_mask"] = result["label_mask"][
+                :, local_slice
+            ]  # (b, s/cp_size)
 
         if (
             not isinstance(result["input_ids"], TensorPointer)
@@ -149,7 +171,9 @@ class DataCollatorForCLMWithPositionIds:
     parallel_context: ParallelContext
     use_doc_masking: bool = True
 
-    def __call__(self, examples: List[Dict[str, List[np.ndarray]]]) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
+    def __call__(
+        self, examples: List[Dict[str, List[np.ndarray]]]
+    ) -> Dict[str, Union[torch.Tensor, TensorPointer]]:
         # Process the case when current rank doesn't require data
         current_pp_rank = dist.get_rank(self.parallel_context.pp_pg)
         if current_pp_rank not in [self.input_pp_rank, self.output_pp_rank]:
@@ -182,7 +206,9 @@ class DataCollatorForCLMWithPositionIds:
         # label_mask should be 1 for all tokens except the last one
 
         # Stack input_ids
-        input_ids = np.vstack([examples[i]["input_ids"] for i in range(len(examples))])  # (b, s)
+        input_ids = np.vstack(
+            [examples[i]["input_ids"] for i in range(len(examples))]
+        )  # (b, s)
         batch_size, expanded_input_length = input_ids.shape
 
         result: Dict[str, Union[np.ndarray, TensorPointer]] = {}
@@ -194,7 +220,8 @@ class DataCollatorForCLMWithPositionIds:
         result["label_mask"] = TensorPointer(group_rank=self.output_pp_rank)
 
         assert expanded_input_length == self.sequence_length + 1, (
-            f"Samples should be of length {self.sequence_length + 1} (seq_len+1), " f"but got {expanded_input_length}"
+            f"Samples should be of length {self.sequence_length + 1} (seq_len+1), "
+            f"but got {expanded_input_length}"
         )
 
         # Process inputs
@@ -203,17 +230,25 @@ class DataCollatorForCLMWithPositionIds:
 
             if "positions" in examples[0] and self.use_doc_masking:
                 # Use provided position_ids if available
-                position_ids = np.vstack([examples[i]["positions"] for i in range(len(examples))])
+                position_ids = np.vstack(
+                    [examples[i]["positions"] for i in range(len(examples))]
+                )
                 # Simply drop the last position ID for each example
                 result["positions"] = position_ids[:, :-1]
             else:
                 # Default: sequential position ids
-                result["positions"] = np.arange(self.sequence_length)[None, :].repeat(batch_size, axis=0)
+                result["positions"] = np.arange(self.sequence_length)[None, :].repeat(
+                    batch_size, axis=0
+                )
 
             # Context Parallelism: Each CP rank gets a slice of the input_ids and position_ids
-            cp_rank, cp_size = dist.get_rank(self.parallel_context.cp_pg), self.parallel_context.context_parallel_size
+            cp_rank, cp_size = (
+                dist.get_rank(self.parallel_context.cp_pg),
+                self.parallel_context.context_parallel_size,
+            )
             local_slice = slice(
-                cp_rank * self.sequence_length // cp_size, (cp_rank + 1) * self.sequence_length // cp_size
+                cp_rank * self.sequence_length // cp_size,
+                (cp_rank + 1) * self.sequence_length // cp_size,
             )
             result["input_ids"] = result["input_ids"][:, local_slice]  # (b, s/cp_size)
             result["positions"] = result["positions"][:, local_slice]  # (b, s/cp_size)
@@ -226,11 +261,15 @@ class DataCollatorForCLMWithPositionIds:
             # Create label mask based on position_ids
             if "positions" in examples[0] and self.use_doc_masking:
                 # Get position_ids for the labels (shifted right by 1 to align with label_ids)
-                position_ids = np.vstack([examples[i]["positions"] for i in range(len(examples))])
+                position_ids = np.vstack(
+                    [examples[i]["positions"] for i in range(len(examples))]
+                )
                 position_ids = position_ids[:, 1:]  # Shift right to align with labels
 
                 # Create mask: True for all tokens except the one before position_id == 0
-                result["label_mask"] = np.ones((batch_size, self.sequence_length), dtype=np.bool_)
+                result["label_mask"] = np.ones(
+                    (batch_size, self.sequence_length), dtype=np.bool_
+                )
 
                 # Find where position_ids is 0
                 zeros = position_ids == 0
@@ -238,14 +277,19 @@ class DataCollatorForCLMWithPositionIds:
                 result["label_mask"] &= ~zeros
             else:
                 # Default: all tokens are used for loss
-                result["label_mask"] = np.ones((batch_size, self.sequence_length), dtype=np.bool_)
+                result["label_mask"] = np.ones(
+                    (batch_size, self.sequence_length), dtype=np.bool_
+                )
 
             # Context Parallelism: Each CP rank gets a slice of the label_ids and label_mask
             local_slice = slice(
-                cp_rank * self.sequence_length // cp_size, (cp_rank + 1) * self.sequence_length // cp_size
+                cp_rank * self.sequence_length // cp_size,
+                (cp_rank + 1) * self.sequence_length // cp_size,
             )
             result["label_ids"] = result["label_ids"][:, local_slice]  # (b, s/cp_size)
-            result["label_mask"] = result["label_mask"][:, local_slice]  # (b, s/cp_size)
+            result["label_mask"] = result["label_mask"][
+                :, local_slice
+            ]  # (b, s/cp_size)
 
         # Validate shapes
         if (

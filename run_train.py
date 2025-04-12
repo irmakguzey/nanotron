@@ -7,13 +7,13 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1 # important for some distributed operations
 torchrun --nproc_per_node=8 run_train.py --config-file examples/config_tiny_llama.yaml
 ```
 """
+
 import argparse
 import time
 from pprint import pformat
 from typing import Dict, Optional, cast
 
 import nanotron.distributed as dist
-from nanotron import logging
 from nanotron.config import (
     DataArgs,
     DatasetStageArgs,
@@ -22,14 +22,8 @@ from nanotron.config import (
     Qwen2Config,
     SFTDatasetsArgs,
 )
-from nanotron.data.dataloader import (
-    dummy_infinite_data_generator,
-    get_train_dataloader,
-)
-from nanotron.data.processing import (
-    clm_process,
-    get_datasets,
-)
+from nanotron.data.dataloader import dummy_infinite_data_generator, get_train_dataloader
+from nanotron.data.processing import clm_process, get_datasets
 from nanotron.data.sft_processing import prepare_sft_dataset
 from nanotron.helpers import (
     compute_remain_train_steps_of_a_data_stage_from_ckp,
@@ -41,6 +35,8 @@ from nanotron.sanity_checks import sanity_check_dataloader
 from nanotron.trainer import DistributedTrainer
 from nanotron.utils import main_rank_first
 from torch.utils.data import DataLoader
+
+from nanotron import logging
 
 try:
     from huggingface_hub import __version__ as hf_hub_version
@@ -72,15 +68,21 @@ def get_dataloader_from_data_stage(
     consumed_train_samples: The number of samples consumed by the model in the this stage (each stage starts from zero).
     num_remaining_train_steps: The number of remaining training steps for this stage.
     """
-    assert consumed_train_samples >= 0, "consumed_train_samples should be greater than 0"
-    assert num_remaining_train_steps >= 0, "num_remaining_train_steps should be greater than 0"
+    assert (
+        consumed_train_samples >= 0
+    ), "consumed_train_samples should be greater than 0"
+    assert (
+        num_remaining_train_steps >= 0
+    ), "num_remaining_train_steps should be greater than 0"
 
     # First, we need to know which ranks to feed the dataloader to
     input_pp_rank, output_pp_rank = get_input_output_pp_ranks(model=trainer.model)
 
     # Case 1: Dummy data generator
     if data.dataset is None:
-        log_rank("Using dummy data generator", logger=logger, level=logging.INFO, rank=0)
+        log_rank(
+            "Using dummy data generator", logger=logger, level=logging.INFO, rank=0
+        )
         dataloader = dummy_infinite_data_generator(
             micro_batch_size=trainer.micro_batch_size,
             sequence_length=trainer.sequence_length,
@@ -96,7 +98,9 @@ def get_dataloader_from_data_stage(
         )()
 
     # Case 2: HuggingFace datasets
-    elif isinstance(data.dataset, PretrainDatasetsArgs) or isinstance(data.dataset, SFTDatasetsArgs):
+    elif isinstance(data.dataset, PretrainDatasetsArgs) or isinstance(
+        data.dataset, SFTDatasetsArgs
+    ):
         log_rank("Using `datasets` library", logger=logger, level=logging.INFO, rank=0)
         tokenizer_path = trainer.config.tokenizer.tokenizer_name_or_path
         log_rank(
@@ -120,7 +124,12 @@ def get_dataloader_from_data_stage(
 
             tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
             tokenizer.padding_side = "left"
-            sequence_sep_tokens = [tokenizer.bos_token, tokenizer.eos_token, tokenizer.pad_token, tokenizer.unk_token]
+            sequence_sep_tokens = [
+                tokenizer.bos_token,
+                tokenizer.eos_token,
+                tokenizer.pad_token,
+                tokenizer.unk_token,
+            ]
             # assert bos or eos are present
             assert (
                 tokenizer.bos_token is not None or tokenizer.eos_token is not None
@@ -175,7 +184,9 @@ def get_dataloader_from_data_stage(
             # Check if we have enough samples for train_steps
             total_tokens_dataset = len(dataloader.dataset) * trainer.sequence_length
             num_tokens_needed_for_training = (
-                num_remaining_train_steps * trainer.global_batch_size * trainer.sequence_length
+                num_remaining_train_steps
+                * trainer.global_batch_size
+                * trainer.sequence_length
             )
             assert num_tokens_needed_for_training <= total_tokens_dataset, (
                 f"Dataset is too small for steps ({total_tokens_dataset} < {num_tokens_needed_for_training}), "
@@ -184,7 +195,9 @@ def get_dataloader_from_data_stage(
 
     # Case 3: Nanosets
     elif isinstance(data.dataset, NanosetDatasetsArgs):
-        log_rank("Using TokenizedBytes Dataloader", logger=logger, level=logging.INFO, rank=0)
+        log_rank(
+            "Using TokenizedBytes Dataloader", logger=logger, level=logging.INFO, rank=0
+        )
         from nanotron.data.tokenized_bytes import get_tb_dataloader, get_tb_datasets
 
         tokenizer_path = trainer.config.tokenizer.tokenizer_name_or_path
@@ -290,7 +303,9 @@ def get_dataloader_from_data_stage(
         # dist.barrier()
 
     else:
-        raise ValueError(f"Unhandled case of `self.config.data.dataset`. Got: {data.dataset}")
+        raise ValueError(
+            f"Unhandled case of `self.config.data.dataset`. Got: {data.dataset}"
+        )
 
     if sanity_check_dataloader_interval is not None:
         sanity_check_dataloader(
@@ -308,11 +323,16 @@ def get_dataloader(
     dataloaders = {}
 
     # Print training plan
-    log_rank("Training plan", logger=logger, level=logging.INFO, rank=0, is_separator=True)
-    stages_info = "".join(
-        f"[Stage {stage.name}] start from step {stage.start_training_step} \n" for stage in trainer.config.data_stages
+    log_rank(
+        "Training plan", logger=logger, level=logging.INFO, rank=0, is_separator=True
     )
-    full_log_message = f"There are {len(trainer.config.data_stages)} training stages \n{stages_info}"
+    stages_info = "".join(
+        f"[Stage {stage.name}] start from step {stage.start_training_step} \n"
+        for stage in trainer.config.data_stages
+    )
+    full_log_message = (
+        f"There are {len(trainer.config.data_stages)} training stages \n{stages_info}"
+    )
     log_rank(full_log_message, logger=logger, level=logging.INFO, rank=0)
 
     for stage_idx, stage in enumerate(trainer.config.data_stages):
@@ -360,7 +380,12 @@ def get_dataloader(
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-file", type=str, required=True, help="Path to the YAML or python config file")
+    parser.add_argument(
+        "--config-file",
+        type=str,
+        required=True,
+        help="Path to the YAML or python config file",
+    )
     parser.add_argument(
         "--sanity-check-dataloader-interval",
         type=int,
