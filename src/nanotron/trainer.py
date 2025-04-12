@@ -895,130 +895,33 @@ class DistributedTrainer:
         remaining_steps = self.config.tokens.train_steps - self.iteration_step
         eta_seconds = int(remaining_steps * (elapsed_time_per_iteration_ms / 1000))
         basic_log_entries = [
-            # LogItem("consumed_samples", self.consumed_train_samples, "human_format"),  # , "12d"),
             LogItem(
                 "consumed_tokens",
                 self.metadata.consumed_train_samples
                 * self.config.tokens.sequence_length,
                 "human_format",
-            ),  # , "12d"),
+            ),
             LogItem(
                 "time_per_iteration_ms", elapsed_time_per_iteration_ms, "human_format"
-            ),  # , ".1f"),
-            LogItem("tokens_per_sec", tokens_per_sec, "human_format"),  # , "1.6E"),
+            ),
+            LogItem("tokens_per_sec", tokens_per_sec, "human_format"),
             LogItem(
                 "tokens_per_sec_per_gpu",
                 tokens_per_sec / self.parallel_context.world_pg.size(),
                 "human_format",
-            ),  # , "1.6E"),
+            ),
             LogItem(
                 "global_batch_size",
                 self.config.global_batch_size_in_tokens,
                 "human_format",
-            ),  # , "5d"),
-            LogItem("lm_loss", loss_avg.item(), "human_format"),  # , "1.6E"),
-            LogItem("lr", lr, "human_format"),  # , ".3E"),
-            LogItem("model_tflops_per_gpu", model_tflops, "human_format"),  # , ".2f"),
-            # LogItem("hardware_tflops_per_gpu", hardware_tflops, "human_format"),  # , ".2f"),
-            LogItem("eta", str(datetime.timedelta(seconds=eta_seconds))),
+            ),
         ]
 
-        def get_cpu_logitems():
-            # Add CPU memory usage metrics
-            memory = psutil.virtual_memory()
-            cpu_memory_log_entries = [
-                LogItem("cpu_memory/total", memory.total, "human_format"),
-                LogItem("cpu_memory/available_bytes", memory.available, "human_format"),
-                LogItem("cpu_memory/used_bytes", memory.used, "human_format"),
-                LogItem("cpu_memory/percent", memory.percent, "human_format"),
-            ]
-
-            # Add swap memory usage metrics
-            swap = psutil.swap_memory()
-            swap_memory_log_entries = [
-                LogItem("swap_memory/total", swap.total, "human_format"),
-                LogItem("swap_memory/free", swap.free, "human_format"),
-                LogItem("swap_memory/used", swap.used, "human_format"),
-                LogItem("swap_memory/percent", swap.percent, "human_format"),
-            ]
-
-            # Add detailed process memory info for main process and workers
-            process = psutil.Process()
-            worker_processes = []
-            # Get all child processes
-            try:
-                worker_processes = process.children(recursive=True)
-            except psutil.NoSuchProcess:
-                pass
-
-            # Log main process memory
-            mem_info = process.memory_info()
-            process_memory_log_entries = [
-                LogItem("process_memory/main/rss", mem_info.rss, "human_format"),
-                LogItem("process_memory/main/shared", mem_info.shared, "human_format"),
-                LogItem("process_memory/main/vms", mem_info.vms, "human_format"),
-                LogItem("process_memory/main/text", mem_info.text, "human_format"),
-                LogItem("process_memory/main/data", mem_info.data, "human_format"),
-                LogItem("process_memory/main/lib", mem_info.lib, "human_format"),
-                LogItem("process_memory/main/dirty", mem_info.dirty, "human_format"),
-            ]
-
-            # Log worker process memory
-            for idx, worker in enumerate(worker_processes):
-                try:
-                    worker_mem = worker.memory_info()
-                    process_memory_log_entries.extend(
-                        [
-                            LogItem(
-                                f"process_memory/worker_{idx}/rss",
-                                worker_mem.rss,
-                                "human_format",
-                            ),
-                            LogItem(
-                                f"process_memory/worker_{idx}/shared",
-                                worker_mem.shared,
-                                "human_format",
-                            ),
-                            LogItem(
-                                f"process_memory/worker_{idx}/vms",
-                                worker_mem.vms,
-                                "human_format",
-                            ),
-                            LogItem(
-                                f"process_memory/worker_{idx}/text",
-                                worker_mem.text,
-                                "human_format",
-                            ),
-                            LogItem(
-                                f"process_memory/worker_{idx}/data",
-                                worker_mem.data,
-                                "human_format",
-                            ),
-                            LogItem(
-                                f"process_memory/worker_{idx}/lib",
-                                worker_mem.lib,
-                                "human_format",
-                            ),
-                            LogItem(
-                                f"process_memory/worker_{idx}/dirty",
-                                worker_mem.dirty,
-                                "human_format",
-                            ),
-                        ]
-                    )
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-            return (
-                cpu_memory_log_entries
-                + swap_memory_log_entries
-                + process_memory_log_entries
+        # Add loss only if it exists
+        if loss_avg is not None:
+            basic_log_entries.append(
+                LogItem("lm_loss", loss_avg.item(), "human_format")
             )
-
-        if z_loss_avg is not None:
-            basic_log_entries.insert(
-                6, LogItem("z_loss", z_loss_avg.item(), "human_format")
-            )  # , "1.6E"),
 
         if self.config.optimizer.clip_grad is not None:
             basic_log_entries.insert(

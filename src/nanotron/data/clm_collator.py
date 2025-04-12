@@ -78,7 +78,6 @@ class DataCollatorForCLM:
             )
 
             # Context Parallelism: Each CP rank gets a slice of the input_ids and input_mask
-
             local_slice = slice(
                 cp_rank * self.sequence_length // cp_size,
                 (cp_rank + 1) * self.sequence_length // cp_size,
